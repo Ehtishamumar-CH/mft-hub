@@ -1,4 +1,12 @@
-import { Annotations, Duration, RemovalPolicy, Stack, StackProps, Validations } from 'aws-cdk-lib';
+import {
+  Annotations,
+  CfnOutput,
+  Duration,
+  RemovalPolicy,
+  Stack,
+  StackProps,
+  Validations,
+} from 'aws-cdk-lib';
 import { PolicyStatement, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
 import { Key } from 'aws-cdk-lib/aws-kms';
 import { LogGroup, RetentionDays } from 'aws-cdk-lib/aws-logs';
@@ -16,6 +24,7 @@ import { Construct } from 'constructs';
 import { PROJECT } from './config';
 import { FilePipeline } from './constructs/file-pipeline';
 import { MonthlyBudget } from './constructs/monthly-budget';
+import { PipelineAlarms } from './constructs/pipeline-alarms';
 import { PartnerAccess } from './constructs/partner-access';
 import { Partner } from './partners';
 
@@ -35,8 +44,8 @@ const ABORT_MPU: LifecycleRule = {
 /**
  * D9: persistent, near-free stack: the KMS key, data buckets with lifecycle
  * rules, the access-log bucket, the alert topic, the monthly budget, partner
- * records (Phase 2) and the file pipeline with its audit table (Phase 3).
- * Alarms land in Phase 4.
+ * records (Phase 2), the file pipeline with its audit table (Phase 3) and
+ * its alarms (Phase 4).
  */
 export class MftCoreStack extends Stack {
   public readonly key: Key;
@@ -48,6 +57,7 @@ export class MftCoreStack extends Stack {
   public readonly budget: MonthlyBudget;
   public readonly partnerAccess: PartnerAccess;
   public readonly pipeline: FilePipeline;
+  public readonly alarms: PipelineAlarms;
   /** Transfer Family structured logs. Here, not in MftSftpStack, so they outlive teardowns (D9). */
   public readonly transferLogGroup: LogGroup;
 
@@ -177,6 +187,32 @@ export class MftCoreStack extends Stack {
       }),
     );
 
+    // CloudWatch alarms publish to the same SSE-KMS topic (CloudWatch SNS guide:
+    // aws:SourceArn on this account's alarms plus aws:SourceAccount).
+    const cloudwatchPrincipal = new ServicePrincipal('cloudwatch.amazonaws.com');
+    const cloudwatchConditions = {
+      StringEquals: { 'aws:SourceAccount': this.account },
+      ArnLike: { 'aws:SourceArn': `arn:aws:cloudwatch:${this.region}:${this.account}:alarm:*` },
+    };
+    this.alertTopic.addToResourcePolicy(
+      new PolicyStatement({
+        sid: 'AllowCloudWatchAlarmsPublish',
+        principals: [cloudwatchPrincipal],
+        actions: ['sns:Publish'],
+        resources: [this.alertTopic.topicArn],
+        conditions: cloudwatchConditions,
+      }),
+    );
+    this.key.addToResourcePolicy(
+      new PolicyStatement({
+        sid: 'AllowCloudWatchForAlertTopic',
+        principals: [cloudwatchPrincipal],
+        actions: ['kms:GenerateDataKey*', 'kms:Decrypt'],
+        resources: ['*'],
+        conditions: cloudwatchConditions,
+      }),
+    );
+
     // D4/D13/D20: partner identity records and the shared partner access role.
     this.partnerAccess = new PartnerAccess(this, 'PartnerAccess', {
       partners: props.partners ?? [],
@@ -198,6 +234,26 @@ export class MftCoreStack extends Stack {
       processedBucket: this.processedBucket,
       quarantineBucket: this.quarantineBucket,
     });
+
+    // D14: DLQ, processor errors, stuck queue, rejected-file rate.
+    this.alarms = new PipelineAlarms(this, 'PipelineAlarms', {
+      pipeline: this.pipeline,
+      topic: this.alertTopic,
+    });
+
+    // Read by scripts/smoke-test.sh and scripts/redrive-dlq.sh.
+    const outputs: Record<string, string> = {
+      LandingBucketName: this.landingBucket.bucketName,
+      ProcessedBucketName: this.processedBucket.bucketName,
+      QuarantineBucketName: this.quarantineBucket.bucketName,
+      TransfersTableName: this.pipeline.table.tableName,
+      ProcessingQueueUrl: this.pipeline.queue.queueUrl,
+      ProcessingQueueArn: this.pipeline.queue.queueArn,
+      DeadLetterQueueArn: this.pipeline.deadLetterQueue.queueArn,
+    };
+    for (const [name, value] of Object.entries(outputs)) {
+      new CfnOutput(this, name, { value });
+    }
 
     // Defaults: $10/month, ACTUAL at 50/80/100 % and FORECASTED at 100 %.
     this.budget = new MonthlyBudget(this, 'MonthlyBudget', {

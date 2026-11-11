@@ -31,7 +31,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import logging
 import os
 import re
 from collections.abc import Iterable, Mapping
@@ -40,8 +39,16 @@ from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import unquote_plus, urlencode
 
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+from aws_lambda_powertools import Logger, Metrics, Tracer, single_metric
+from aws_lambda_powertools.metrics import MetricUnit
+
+# D21: Powertools from the AWS-managed layer. Service name and namespace are
+# fixed here so tests and the deployed function report the same names.
+SERVICE = "file-processor"
+METRICS_NAMESPACE = "MftHub"
+logger = Logger(service=SERVICE)
+metrics = Metrics(namespace=METRICS_NAMESPACE, service=SERVICE)
+tracer = Tracer(service=SERVICE)
 
 INBOUND_PREFIX = "inbound/"
 PARTNER_ID_RE = re.compile(r"^[A-Z0-9]{2,32}$")
@@ -264,19 +271,20 @@ class Processor:
         self.s3 = s3
         self.table = table
 
-    def _head(self, src: SourceObject) -> tuple[SourceObject, Mapping[str, Any]]:
+    def _head(self, src: SourceObject) -> tuple[SourceObject, Mapping[str, Any], bool]:
         """HEAD the exact version. Retries once with a URL-decoded key, in case
-        the event key is URL-encoded (unverified for EventBridge; harmless)."""
+        the event key is URL-encoded. The third value says whether the decoded
+        key was needed; it is logged as ``keyDecoded``."""
         try:
-            return src, self.s3.head_object(
-                Bucket=src.bucket, Key=src.key, VersionId=src.version_id
-            )
+            head = self.s3.head_object(Bucket=src.bucket, Key=src.key, VersionId=src.version_id)
+            return src, head, False
         except Exception as err:
             decoded = unquote_plus(src.key)
             if _error_code(err) not in ("404", "NoSuchKey", "NoSuchVersion") or decoded == src.key:
                 raise
         src = SourceObject(src.bucket, decoded, src.version_id, src.size, src.etag)
-        return src, self.s3.head_object(Bucket=src.bucket, Key=src.key, VersionId=src.version_id)
+        head = self.s3.head_object(Bucket=src.bucket, Key=src.key, VersionId=src.version_id)
+        return src, head, True
 
     def _claim(self, key: dict[str, str], item: dict[str, Any]) -> str | None:
         """Conditional put of the RECEIVED record. Returns the existing status
@@ -293,10 +301,12 @@ class Processor:
         existing = self.table.get_item(Key=key, ConsistentRead=True).get("Item", {})
         return str(existing.get("status", RECEIVED))
 
+    @tracer.capture_method(capture_response=False)
     def process(self, src: SourceObject) -> Outcome:
         if src.bucket != self.cfg.landing_bucket:
             return Outcome("IGNORED", reason=f"not the landing bucket: {src.bucket}")
-        src, head = self._head(src)
+        src, head, key_decoded = self._head(src)
+        logger.append_keys(sourceKey=src.key, versionId=src.version_id, keyDecoded=key_decoded)
         loc = locate(src.key)
         size = int(head.get("ContentLength", src.size))
         transfer_ts = iso(head["LastModified"])
@@ -380,6 +390,23 @@ class Processor:
         )
 
 
+def record_metrics(outcome: Outcome) -> None:
+    """D21: FilesValidated, FilesRejected (total, for the rate alarm) and
+    FilesRejected by reason. Duplicates and ignored events are not counted."""
+    if outcome.status == VALIDATED:
+        metrics.add_metric(name="FilesValidated", unit=MetricUnit.Count, value=1)
+    elif outcome.status == REJECTED:
+        metrics.add_metric(name="FilesRejected", unit=MetricUnit.Count, value=1)
+        with single_metric(
+            name="FilesRejected",
+            unit=MetricUnit.Count,
+            value=1,
+            namespace=METRICS_NAMESPACE,
+            default_dimensions={"service": SERVICE},
+        ) as metric:
+            metric.add_dimension(name="reason", value=str(outcome.reason))
+
+
 _processor: Processor | None = None
 
 
@@ -400,30 +427,37 @@ def handle_batch(event: Mapping[str, Any], processor: Processor) -> dict[str, An
     failures = []
     for record in event.get("Records", []):
         message_id = record.get("messageId")
+        # One log context per message: the EventBridge event ID is the
+        # correlation ID that ties together all lines for one upload.
+        logger.remove_keys(["sourceKey", "versionId", "keyDecoded"])
+        logger.append_keys(messageId=message_id)
         try:
-            src = parse_event(record["body"])
+            body = json.loads(record["body"])
+            logger.set_correlation_id(body.get("id"))
+            src = parse_event(body)
             if src is None:
-                logger.info(json.dumps({"messageId": message_id, "outcome": "IGNORED"}))
+                logger.info("event ignored", extra={"outcome": "IGNORED"})
                 continue
             outcome = processor.process(src)
+            record_metrics(outcome)
             logger.info(
-                json.dumps(
-                    {
-                        "messageId": message_id,
-                        "sourceKey": src.key,
-                        "versionId": src.version_id,
-                        "outcome": outcome.status,
-                        "reason": outcome.reason,
-                        "dest": outcome.dest,
-                        **outcome.extra,
-                    }
-                )
+                "file processed",
+                extra={
+                    "outcome": outcome.status,
+                    "reason": outcome.reason,
+                    "dest": outcome.dest,
+                    **outcome.extra,
+                },
             )
         except Exception:
-            logger.exception("processing failed for message %s", message_id)
+            logger.exception("processing failed")
+            metrics.add_metric(name="ProcessingFailures", unit=MetricUnit.Count, value=1)
             failures.append({"itemIdentifier": message_id})
     return {"batchItemFailures": failures}
 
 
+@logger.inject_lambda_context(clear_state=True)
+@tracer.capture_lambda_handler(capture_response=False)
+@metrics.log_metrics
 def handler(event: Mapping[str, Any], _context: object) -> dict[str, Any]:
     return handle_batch(event, _get_processor())

@@ -2,7 +2,7 @@
 
 A managed file transfer (MFT) hub on AWS. Partners upload over SFTP (AWS Transfer Family) into a per-partner jail. Every file is validated, routed to `processed/` or quarantined in `rejected/`, and recorded in a DynamoDB audit table. Built with AWS CDK (TypeScript) and Python Lambdas, in `eu-central-2` (Zurich) for Swiss data residency.
 
-> Status: **Phase 3 - file pipeline (EventBridge, SQS, processing Lambda, DynamoDB audit table).** Phases 1 to 3 are deployed. Design decisions live in [docs/DECISIONS.md](docs/DECISIONS.md).
+> Status: **Phase 4 - observability: alarms, Powertools logs/metrics/tracing, smoke test, DLQ redrive.** Phases 1 to 3 are deployed. Design decisions live in [docs/DECISIONS.md](docs/DECISIONS.md).
 
 ## Architecture (target)
 
@@ -30,6 +30,7 @@ Two stacks (D9): `MftCoreStack` is persistent and close to free; `MftSftpStack` 
 | `test/`                     | Jest CDK assertion tests, including a canary that proves the cdk-nag gate fails on a non-compliant resource. |
 | `lambdas/`                  | Python 3.12 Lambda code (`src/`) and pytest + moto tests (`tests/`).                                         |
 | `config/partners.json`      | Partner onboarding (public SSH keys only).                                                                   |
+| `scripts/`                  | `smoke-test.sh` (post-deploy check over SFTP) and `redrive-dlq.sh` (replay the DLQ).                         |
 | `docs/`                     | Decision log and AWS account setup guide.                                                                    |
 | `AI_ENGINEERING_JOURNAL.md` | Per-phase log of AI-assisted work and human review.                                                          |
 
@@ -57,6 +58,17 @@ python -m venv .venv && .venv/Scripts/pip install -r requirements-dev.txt   # bi
 ```
 
 The CDK CLI is a pinned dev dependency, so always run it with `npx cdk`.
+
+## Operations
+
+```bash
+scripts/smoke-test.sh            # after a deploy: 3 SFTP uploads as ACMEBANK, asserts routing and records
+scripts/redrive-dlq.sh           # after fixing a DLQ alarm cause: replay the DLQ (idempotent, D30)
+```
+
+Both need both stacks deployed and use `AWS_PROFILE=mft-hub` unless set. The smoke test needs the partner's private key in `.keys/` (D23).
+
+Alarms (`mft-hub-*`) go to the alert topic on ALARM and on OK: DLQ not empty, processor errors, processing queue stuck for over 1 hour, and more than 50 % of files rejected in an hour (once at least 3 files arrived). Metrics are in the `MftHub` namespace (`FilesValidated`, `FilesRejected`, `FilesRejected` by `reason`, `ProcessingFailures`).
 
 ## CI
 

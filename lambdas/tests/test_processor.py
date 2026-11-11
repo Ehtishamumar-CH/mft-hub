@@ -1,5 +1,6 @@
 """Tests for the file processor (D5, D6, D12, D17, D18, D30)."""
 
+import io
 import json
 
 import boto3
@@ -342,3 +343,75 @@ def test_other_buckets_and_events_are_ignored(aws):
     deleted = s3_event("inbound/ACME/a.csv", detail_type="Object Deleted")
     assert p.handle_batch(sqs(other, deleted), proc) == {"batchItemFailures": []}
     assert items(table) == []
+
+
+# --- observability (D21) ----------------------------------------------------
+
+
+@pytest.fixture
+def clean_metrics():
+    p.metrics.clear_metrics()
+    yield
+    p.metrics.clear_metrics()
+
+
+def emf_lines(text):
+    """EMF documents (metrics) and log lines are both JSON on stdout."""
+    docs = [json.loads(line) for line in text.splitlines() if line.startswith("{")]
+    return [d for d in docs if "_aws" in d], [d for d in docs if "_aws" not in d]
+
+
+def test_metrics_count_outcomes_and_rejection_reasons(aws, clean_metrics, capfd):
+    s3, table, proc = aws
+    good = upload(s3, "inbound/ACME/ACME_20261111_orders.csv", b"a,b\n")
+    bad = upload(s3, "inbound/ACME/ACME_20261111_x.pdf", b"text")
+    p.handle_batch(sqs(good, bad), proc)
+
+    totals = p.metrics.serialize_metric_set()
+    assert totals["FilesValidated"] == [1.0]
+    assert totals["FilesRejected"] == [1.0]
+    assert totals["_aws"]["CloudWatchMetrics"][0]["Namespace"] == "MftHub"
+    assert totals["_aws"]["CloudWatchMetrics"][0]["Dimensions"] == [["service"]]
+
+    by_reason, _ = emf_lines(capfd.readouterr().out)
+    [doc] = by_reason
+    assert doc["reason"] == p.CONTENT_MISMATCH
+    assert doc["FilesRejected"] == [1.0]
+    assert sorted(doc["_aws"]["CloudWatchMetrics"][0]["Dimensions"][0]) == ["reason", "service"]
+
+
+def test_duplicates_are_not_counted(aws, clean_metrics):
+    s3, table, proc = aws
+    event = upload(s3, "inbound/ACME/ACME_20261111_orders.csv", b"a,b\n")
+    p.handle_batch(sqs(event), proc)
+    p.metrics.clear_metrics()
+    p.handle_batch(sqs(event), proc)
+    assert "FilesValidated" not in p.metrics.metric_set
+
+
+def test_failures_are_counted(aws, clean_metrics):
+    s3, table, proc = aws
+    missing = s3_event("inbound/ACME/ACME_20261111_gone.csv", version_id="nope")
+    p.handle_batch(sqs(missing), proc)
+    assert p.metrics.serialize_metric_set()["ProcessingFailures"] == [1.0]
+
+
+def test_log_line_carries_correlation_id_and_key_path(aws, clean_metrics):
+    s3, table, proc = aws
+    event = upload(s3, "inbound/ACME/ACME 20261111 x.csv", b"a")
+    event["detail"]["object"]["key"] = "inbound/ACME/ACME+20261111+x.csv"
+    event["id"] = "evt-123"
+    buf = io.StringIO()
+    old = p.logger.registered_handler.setStream(buf)
+    try:
+        p.handle_batch(sqs(event, ids=["m1"]), proc)
+    finally:
+        p.logger.registered_handler.setStream(old)
+
+    _, logs = emf_lines(buf.getvalue())
+    [line] = [entry for entry in logs if entry.get("message") == "file processed"]
+    assert line["correlation_id"] == "evt-123"
+    assert line["messageId"] == "m1"
+    assert line["keyDecoded"] is True
+    assert line["sourceKey"] == "inbound/ACME/ACME 20261111 x.csv"
+    assert line["service"] == "file-processor"
