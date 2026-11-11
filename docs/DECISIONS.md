@@ -48,6 +48,19 @@ Living log of decisions made while designing the MFT Hub. Each entry: decision, 
 - Note for log readers: a wrong-key login shows an IdP **allow** (the IdP returns the partner's valid keys) followed by a Transfer `AUTH_FAILURE`. The key comparison happens in Transfer, not the Lambda.
 - Leftover: `inbound/ACMEBANK/ACMEBANK_20261111_smoke.csv` stays in the landing bucket (no pipeline until Phase 3).
 
+## Environment facts (verified 2026-11-11, Phase 3 deploy)
+
+- `MftCoreStack` updated by the user from `main` (after PR 12): `UPDATE_COMPLETE` at 16:43 UTC, all 11 pipeline resources `CREATE_COMPLETE`, landing bucket `EventBridgeConfiguration` on, alert subscription kept.
+- Live SFTP test as ACMEBANK, 6 uploads at 16:53:34 UTC, all processed within about 15 s:
+  - `ACMEBANK_20261111_orders.csv` → `VALIDATED`, copied to processed `ACMEBANK/`, SHA-256 matches the local file.
+  - `..._statement.pdf` (text, not a PDF) → `CONTENT_MISMATCH`; `orders.csv`, `..._my file.csv`, `..._a+b.json` → `INVALID_FILENAME`; `..._empty.csv` → `EMPTY_FILE` (no hash, as designed).
+  - Rejected files are in quarantine `rejected/ACMEBANK/`, tagged `mft-status`, `mft-reason`, `mft-partner`, `mft-sha256`. Copies are SSE-KMS with the project key and bucket key.
+  - Landing keeps only the pre-pipeline smoke file; the 6 processed uploads have delete markers. Processing queue and DLQ both empty.
+- Idempotency live: the valid file's event replayed into the processing queue was logged `DUPLICATE` (reason `VALIDATED`); still 6 records and 1 object version in processed.
+- Processor: about 1.6 s per file on a cold start, 110-170 ms warm, 99 MB of 512 MB used. No errors.
+- Keys with a space and a `+` resolved to the right objects. **Not yet confirmed:** whether EventBridge sends keys URL-encoded (the processor's decoded-key fallback would hide it). S3 access logs for 16:53 had not arrived yet; look for a `REST.HEAD.OBJECT` 404 on `my+file` or `a%2Bb`.
+- Leftover: `inbound/ACMEBANK/ACMEBANK_20261111_smoke.csv` predates the pipeline and is not processed.
+
 ## Settled
 
 | #   | Decision                                                                                                                                                                                                                                                                                                                   | Rationale                                                                                                                 |
@@ -99,6 +112,6 @@ Living log of decisions made while designing the MFT Hub. Each entry: decision, 
 1. Phase 0 — tooling (AWS CLI, CDK), `aws login` (D8), enable Zurich (D25), `cdk bootstrap`; repo + CI skeleton + cdk-nag. **Done 2026-11-11** (local; GitHub push pending).
 2. Phase 1 — `MftCoreStack`: KMS, buckets, log bucket, lifecycle, budget, SNS. **Deployed 2026-11-11** from branch `phase-1/core` (user ran `cdk deploy`).
 3. Phase 2 — `MftSftpStack`: Transfer server, IdP Lambda, partner secrets from `partners.json`, access role + session policies. **Deployed 2026-11-11** from branch `phase-2/sftp` (user ran `cdk deploy`).
-4. Phase 3 — EventBridge → SQS → processing Lambda → DynamoDB, idempotency, routing. **Built 2026-11-11** on branch `phase-3/pipeline` (not yet deployed).
+4. Phase 3 — EventBridge → SQS → processing Lambda → DynamoDB, idempotency, routing. **Deployed 2026-11-11** from `main` (PR 12; user ran `cdk deploy`).
 5. Phase 4 — DLQ, alarms, Powertools metrics, smoke test.
 6. Phase 5 — journal completion, README, teardown script.
