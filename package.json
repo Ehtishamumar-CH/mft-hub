@@ -1,0 +1,39 @@
+{
+  "name": "mft-hub",
+  "version": "0.1.0",
+  "description": "Managed File Transfer hub on AWS Transfer Family (SFTP), S3, EventBridge, SQS, Lambda and DynamoDB, built with AWS CDK.",
+  "license": "MIT",
+  "private": true,
+  "bin": {
+    "mft-hub": "bin/mft-hub.ts"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc --noEmit",
+    "lint": "eslint . && prettier --check .",
+    "format": "prettier --write .",
+    "test": "jest",
+    "synth": "cdk synth --strict",
+    "cdk": "cdk"
+  },
+  "dependencies": {
+    "aws-cdk-lib": "2.275.0",
+    "cdk-nag": "3.0.2",
+    "constructs": "10.8.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/jest": "30.0.0",
+    "@types/node": "22.20.5",
+    "aws-cdk": "2.1146.1",
+    "eslint": "10.13.0",
+    "jest": "30.5.2",
+    "prettier": "3.9.10",
+    "ts-jest": "29.4.15",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.72.1"
+  }
+}
