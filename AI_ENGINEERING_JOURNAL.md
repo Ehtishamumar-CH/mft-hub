@@ -241,7 +241,7 @@ Prompts for my review:
 - The agent instead uploaded the same three test cases straight to the landing bucket. Routing, Powertools log fields, metrics by reason and X-Ray traces all appeared as designed.
 - The open Phase 3 question is closed: `keyDecoded: false` for a key with a space, so EventBridge sends raw keys.
 - Both alarm paths were exercised live through the encrypted topic: the rejected-rate alarm fired on real data (2 of 3 rejected), and a test message on the DLQ fired the DLQ alarm, was replayed with `scripts/redrive-dlq.sh`, skipped as a duplicate, and the alarm cleared.
-- Still to do: run `scripts/smoke-test.sh` end to end the next time `MftSftpStack` is deployed.
+- Done later the same day: after I redeployed `MftSftpStack`, `scripts/smoke-test.sh` passed 9 of 9 checks over SFTP (see the Phase 5 entry).
 
 ### Lessons
 
@@ -290,3 +290,8 @@ Prompts for my review:
 - Destructive scripts need a dry run that shows every command, and the dry run must be run against the real account.
 - Tags are not an inventory: check which resources actually carry them before deleting by tag.
 - Lessons repeat (Git Bash path conversion); put the fix in the script, not only in the notes.
+
+### Smoke test over SFTP (after Phase 5)
+
+- I redeployed `MftSftpStack` and asked for the smoke test. It passed 9 of 9 checks on its first run, in 68 s. The agent cross-checked the IdP and processor logs, the queues and the alarms instead of trusting the script's own PASS.
+- Side effect found: the smoke test rejects 2 of 3 files by design, so it trips the rejected-rate alarm every run (an email now and an OK an hour later). Options: accept it as proof the alarm works, or upload more valid files so a smoke run stays under 50 %.
