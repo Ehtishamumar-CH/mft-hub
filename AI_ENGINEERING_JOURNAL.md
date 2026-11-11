@@ -191,3 +191,49 @@ Prompts for my review:
 - Idempotency keys must separate "same event twice" from "same content twice".
 - In an at-least-once pipeline, write the "done" marker last and make every step before it repeatable.
 - A fallback that makes both cases work also hides which case happened; log which branch ran when the question matters.
+
+---
+
+## Phase 4 - Observability: alarms, Powertools, smoke test, DLQ redrive (2026-11-11)
+
+### Goal
+
+Know when the pipeline breaks without watching it: alarms to email, structured logs and metrics per file, traces, a one-command post-deploy check and a one-command replay.
+
+### Prompts
+
+- "lets start the phase 4"
+
+### AI output (summary)
+
+- `lib/constructs/pipeline-alarms.ts`: four alarms (DLQ not empty, processor errors, queue stuck, rejected-file rate) with ALARM and OK notifications (D32). CloudWatch topic and key grants in `MftCoreStack`, plus stack outputs for the scripts.
+- `lib/constructs/powertools.ts`: the AWS-managed Powertools layer, pinned to the version the tests use. The processor gets active X-Ray tracing.
+- `processor.py`: Powertools Logger (correlation ID = EventBridge event ID, `keyDecoded`), Metrics (`FilesValidated`, `FilesRejected`, by reason, `ProcessingFailures`) and Tracer (D33).
+- `scripts/smoke-test.sh` (D23) and `scripts/redrive-dlq.sh` (D17).
+- 4 new pytest tests (82 total) and 7 new Jest tests.
+
+### My review
+
+_TODO (me): security / cost / correctness review in my own words._
+
+Prompts for my review:
+
+- Per-file failures are caught (partial batch), so Lambda `Errors` only shows crashes. Is the DLQ alarm enough, or should `ProcessingFailures` alarm too (noisier, earlier)?
+- The rejected-rate alarm needs 3 files in an hour. Right threshold for a demo vs. production?
+- The processor role's X-Ray acknowledgement covers any `*` resource; a Jest test pins it to the two X-Ray actions. Is a test the right guard for that?
+- Cost: 4 standard alarms are about $0.40/month; X-Ray and custom metrics stay within the free tier at demo volume (to check against the bill).
+
+### Changes made during the phase
+
+- Checked the Powertools layer in `eu-central-2`: version 40 is 3.37.0 (published 2026-10-22), the same version as the test pin. Newer layers (3.38 to 3.40) were skipped by the 14-day cooldown.
+- Powertools Tracer needs `aws-xray-sdk` even with tracing disabled, so tests failed on import. Pinned `aws-xray-sdk` 2.15.0 for tests (2.16.0 is 12 days old).
+- Read the CloudWatch SNS guide for the topic and key grants (D32).
+- The Powertools Logger writes to the stream it saw at import time, so pytest's `capsys`/`capfd` saw nothing; the test swaps the handler's stream.
+- The Windows AWS CLI prints CRLF, so every `$(aws ...)` comparison in the scripts would have failed in Git Bash. Found by running the DynamoDB query from the smoke test against the live table; the scripts strip `
+`.
+- cdk-nag flagged `IAM5[Resource::*]` for the X-Ray actions CDK adds with active tracing; acknowledged with the reason (X-Ray has no resource-level permissions).
+
+### Lessons
+
+- Run a script's AWS calls against the real account on the real shell before trusting it; CI on Linux would not catch CRLF.
+- A per-entity nag acknowledgement can hide later findings of the same ID; pin what it covers with a test.

@@ -5,12 +5,19 @@ import { Rule } from 'aws-cdk-lib/aws-events';
 import { SqsQueue } from 'aws-cdk-lib/aws-events-targets';
 import { PolicyStatement, Role, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
 import { IKey } from 'aws-cdk-lib/aws-kms';
-import { Architecture, Code, Function as LambdaFunction, Runtime } from 'aws-cdk-lib/aws-lambda';
+import {
+  Architecture,
+  Code,
+  Function as LambdaFunction,
+  Runtime,
+  Tracing,
+} from 'aws-cdk-lib/aws-lambda';
 import { SqsEventSource } from 'aws-cdk-lib/aws-lambda-event-sources';
 import { LogGroup, RetentionDays } from 'aws-cdk-lib/aws-logs';
 import { Bucket, CfnBucket } from 'aws-cdk-lib/aws-s3';
 import { Queue, QueueEncryption } from 'aws-cdk-lib/aws-sqs';
 import { Construct } from 'constructs';
+import { powertoolsLayer } from './powertools';
 
 /** Lambda timeout. The queue's visibility timeout is 6x this (AWS guidance for SQS sources). */
 export const PROCESSOR_TIMEOUT = Duration.minutes(5);
@@ -192,12 +199,20 @@ export class FilePipeline extends Construct {
       timeout: PROCESSOR_TIMEOUT,
       role,
       logGroup,
+      layers: [powertoolsLayer(this)],
+      tracing: Tracing.ACTIVE, // D21
       environment: {
         LANDING_BUCKET: landingBucket.bucketName,
         PROCESSED_BUCKET: processedBucket.bucketName,
         QUARANTINE_BUCKET: quarantineBucket.bucketName,
         TABLE_NAME: this.table.tableName,
       },
+    });
+    Validations.of(role).acknowledge({
+      id: 'AwsSolutions::AwsSolutions-IAM5[Resource::*]',
+      reason:
+        'Added by CDK for active tracing (D21): xray:PutTraceSegments and PutTelemetryRecords ' +
+        'do not support resource-level permissions, so the resource must be "*".',
     });
     Validations.of(this.processor).acknowledge({
       id: 'AwsSolutions-L1',
