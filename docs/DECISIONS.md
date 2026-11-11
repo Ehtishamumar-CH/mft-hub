@@ -37,6 +37,17 @@ Living log of decisions made while designing the MFT Hub. Each entry: decision, 
 - **Not yet verified:** delivery of a real budget alert through the encrypted topic (needs spend over 50 %).
 - Redeploys must pass the same `-c alertEmail=...`, or CDK removes the subscription.
 
+## Environment facts (verified 2026-11-11, Phase 2 deploy)
+
+- `MftSftpStack` deployed by the user: `CREATE_COMPLETE`. `MftCoreStack` `UPDATE_COMPLETE`, and the alert email subscription survived the update (same subscription ID).
+- Server `s-01dc0284532b4873b` (`s-01dc0284532b4873b.server.transfer.eu-central-2.amazonaws.com`): `ONLINE`, PUBLIC, SFTP only, `AWS_LAMBDA`, `PUBLIC_KEY`, `TransferSecurityPolicy-2025-03`, structured logs to the core Transfer log group, no logging role.
+- `aws transfer test-identity-provider`: ACMEBANK and GLOBEX allowed, each with only its own key and three logical folders; live session policies are 1334 and 1316 chars (limit 2048). `NOSUCHPARTNER` and `acmebank` denied (no role returned).
+- Real SFTP (OpenSSH client, demo keys): ACMEBANK upload to `/inbound` OK; root lists only `/inbound /processed /rejected`; write to `/processed`, write to `/` and delete in `/inbound` all denied. GLOBEX sees an empty `/inbound` and cannot reach ACMEBANK files with `..` paths. ACMEBANK with GLOBEX's key fails with `Permission denied (publickey)`.
+- Uploaded object: SSE-KMS with the project key, bucket key on, versioned.
+- Logs: one JSON decision line per IdP call (allow/deny + reason), no log events containing "password". Transfer logs show `CONNECTED`, `Access denied` errors and `AUTH_FAILURE`.
+- Note for log readers: a wrong-key login shows an IdP **allow** (the IdP returns the partner's valid keys) followed by a Transfer `AUTH_FAILURE`. The key comparison happens in Transfer, not the Lambda.
+- Leftover: `inbound/ACMEBANK/ACMEBANK_20261111_smoke.csv` stays in the landing bucket (no pipeline until Phase 3).
+
 ## Settled
 
 | #   | Decision                                                                                                                                                                                                                                                                                                                   | Rationale                                                                                                                 |
@@ -85,7 +96,7 @@ Living log of decisions made while designing the MFT Hub. Each entry: decision, 
 
 1. Phase 0 — tooling (AWS CLI, CDK), `aws login` (D8), enable Zurich (D25), `cdk bootstrap`; repo + CI skeleton + cdk-nag. **Done 2026-11-11** (local; GitHub push pending).
 2. Phase 1 — `MftCoreStack`: KMS, buckets, log bucket, lifecycle, budget, SNS. **Deployed 2026-11-11** from branch `phase-1/core` (user ran `cdk deploy`).
-3. Phase 2 — `MftSftpStack`: Transfer server, IdP Lambda, partner secrets from `partners.json`, access role + session policies. **Built 2026-11-11** (branch `phase-2/sftp`; not yet deployed).
+3. Phase 2 — `MftSftpStack`: Transfer server, IdP Lambda, partner secrets from `partners.json`, access role + session policies. **Deployed 2026-11-11** from branch `phase-2/sftp` (user ran `cdk deploy`).
 4. Phase 3 — EventBridge → SQS → processing Lambda → DynamoDB, idempotency, routing.
 5. Phase 4 — DLQ, alarms, Powertools metrics, smoke test.
 6. Phase 5 — journal completion, README, teardown script.

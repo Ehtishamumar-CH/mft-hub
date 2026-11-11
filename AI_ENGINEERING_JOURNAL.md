@@ -131,7 +131,13 @@ Prompts for my review:
 - cdk-nag 3 reports `IAM5` once per wildcard resource, so every wildcard is acknowledged individually with its reason instead of one blanket acknowledgement.
 - The Jest run caught a bug in the IdP role acknowledgement: with no account at synth time, cdk-nag renders the account as `<AWS::AccountId>`. The ID now handles both cases.
 
+### Deployment and verification
+
+- I ran `cdk deploy` for both stacks. The agent then verified in the account: stack and server state, `test-identity-provider` allow/deny cases, a real SFTP session per partner (upload, forbidden write, forbidden delete, cross-partner and `..` path attempts, wrong key), object encryption, and the IdP and Transfer logs.
+- Everything matched the design. One log nuance: a wrong-key login shows an IdP allow followed by a Transfer `AUTH_FAILURE`, because Transfer does the key comparison.
+
 ### Lessons
 
 - Read the service's auth contract and limits before writing policy code.
 - Prefer granular nag acknowledgements; a blanket one hides new wildcards.
+- Test the negative paths against the live service, not only in unit tests: path tricks and wrong keys are where isolation bugs hide.
