@@ -14,6 +14,7 @@ import { Topic } from 'aws-cdk-lib/aws-sns';
 import { EmailSubscription } from 'aws-cdk-lib/aws-sns-subscriptions';
 import { Construct } from 'constructs';
 import { PROJECT } from './config';
+import { FilePipeline } from './constructs/file-pipeline';
 import { MonthlyBudget } from './constructs/monthly-budget';
 import { PartnerAccess } from './constructs/partner-access';
 import { Partner } from './partners';
@@ -32,10 +33,10 @@ const ABORT_MPU: LifecycleRule = {
 };
 
 /**
- * D9: persistent, near-free stack. Phase 1 adds the KMS key, data buckets
- * with lifecycle rules, the access-log bucket, the alert topic and the
- * monthly budget. DynamoDB, the pipeline, alarms and partner secrets land in
- * later phases.
+ * D9: persistent, near-free stack: the KMS key, data buckets with lifecycle
+ * rules, the access-log bucket, the alert topic, the monthly budget, partner
+ * records (Phase 2) and the file pipeline with its audit table (Phase 3).
+ * Alarms land in Phase 4.
  */
 export class MftCoreStack extends Stack {
   public readonly key: Key;
@@ -46,6 +47,7 @@ export class MftCoreStack extends Stack {
   public readonly alertTopic: Topic;
   public readonly budget: MonthlyBudget;
   public readonly partnerAccess: PartnerAccess;
+  public readonly pipeline: FilePipeline;
   /** Transfer Family structured logs. Here, not in MftSftpStack, so they outlive teardowns (D9). */
   public readonly transferLogGroup: LogGroup;
 
@@ -187,6 +189,14 @@ export class MftCoreStack extends Stack {
     this.transferLogGroup = new LogGroup(this, 'TransferLogGroup', {
       retention: RetentionDays.ONE_YEAR,
       removalPolicy: RemovalPolicy.RETAIN,
+    });
+
+    // D6/D12/D17/D18: landing -> EventBridge -> SQS -> processor -> DynamoDB.
+    this.pipeline = new FilePipeline(this, 'FilePipeline', {
+      key: this.key,
+      landingBucket: this.landingBucket,
+      processedBucket: this.processedBucket,
+      quarantineBucket: this.quarantineBucket,
     });
 
     // Defaults: $10/month, ACTUAL at 50/80/100 % and FORECASTED at 100 %.
