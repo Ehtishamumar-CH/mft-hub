@@ -28,6 +28,15 @@ Living log of decisions made while designing the MFT Hub. Each entry: decision, 
 - **cdk-nag 3.x API:** `Validations.of(app).addPlugins(new AwsSolutionsChecks(app))`; suppressions via `Validations.of(construct).acknowledge({ id, reason })`. This replaces `Aspects` + `NagSuppressions` (D22 still holds: every acknowledgement carries a reason).
 - Git Bash: prefix AWS CLI calls whose arguments start with `/` (SSM names) with `MSYS_NO_PATHCONV=1`.
 
+## Environment facts (verified 2026-11-11, Phase 1 deploy)
+
+- `MftCoreStack` deployed to `eu-central-2` by the user at 13:32 UTC: `CREATE_COMPLETE`, termination protection on, 20 resources.
+- Verified live: KMS key `alias/mft-hub` rotation enabled (365 days). The three data buckets use SSE-KMS with that key and bucket keys; the access-log bucket uses SSE-S3. All four have Block Public Access (all four flags), `BucketOwnerEnforced`, versioning enabled and every lifecycle rule `Enabled`. The data buckets log to the access-log bucket under `landing/`, `processed/` and `quarantine/`.
+- Alert topic is SSE-KMS. The email subscription is confirmed (1 confirmed, 0 pending). The address is supplied at deploy time only (D14).
+- Budget `mft-hub-monthly-e748878c`: $10 monthly COST budget, notifications ACTUAL 50/80/100 and FORECASTED 100, all `OK`. ACTUAL 80 checked: its subscriber is the alert topic (SNS).
+- **Not yet verified:** delivery of a real budget alert through the encrypted topic (needs spend over 50 %).
+- Redeploys must pass the same `-c alertEmail=...`, or CDK removes the subscription.
+
 ## Settled
 
 | #   | Decision                                                                                                                                                                                                                                                                                                                   | Rationale                                                                                                                 |
@@ -57,6 +66,7 @@ Living log of decisions made while designing the MFT Hub. Each entry: decision, 
 | D22 | **cdk-nag (AwsSolutions pack)** runs on synth and fails CI; every suppression carries a written justification. | Automated security gate; journal material. |
 | D23 | **`scripts/smoke-test.sh`**: SFTP as `ACMEBANK`, upload one valid + one invalid file, assert routing and DynamoDB records. Test keypairs generated into gitignored `.keys/`; only public keys go into `partners.json`. | Repeatable post-deploy verification and demo. |
 | D24 | **Public GitHub repo `Ehtishamumar-CH/mft-hub`**, `main` protected (CI required). One branch + PR per phase, user merges. Agent asks before the first push. | Portfolio link; PR history tells the build story. |
+| D26 | **Budget via CDK custom resource.** `MftCoreStack` manages the $10/month account budget with an `AwsCustomResource` that calls the Budgets API (`us-east-1` endpoint): ACTUAL 50/80/100 %, FORECASTED 100 %, all to the alert topic. The budget name carries a config hash, so a change creates the new budget before the old one is deleted. _(2026-11-11, chosen by user.)_ | CloudFormation has no `AWS::Budgets::Budget` type in `eu-central-2` or `eu-north-1`, and the region SCP denies CloudFormation in `us-east-1`. The Budgets API itself is allowed. Keeps the budget in IaC and removes it on destroy. |
 
 ## Defaults (assumed unless overridden)
 
@@ -64,12 +74,14 @@ Living log of decisions made while designing the MFT Hub. Each entry: decision, 
 - Partner secrets named `mft/partners/<PARTNERID>`, containing public keys, role ARN, home-directory mappings, optional source-IP allowlist (checked by IdP Lambda).
 - Lambdas on arm64; processing Lambda 512 MB / 5 min timeout (streams the object for SHA-256); IdP Lambda 128 MB / 10 s.
 - AWS Budget: $10/month, alerts at 50% / 80% / 100% forecast to the SNS topic.
+- Phase 1 specifics: the access-log bucket is **SSE-S3** (S3 cannot deliver server access logs to SSE-KMS buckets) and expires logs after 90 days. Noncurrent versions expire after 7 days (landing, quarantine, logs) or 30 days (processed). All buckets and the KMS key are `RETAIN`.
+- The alert topic is SSE-KMS with the project CMK, so the key policy grants `budgets.amazonaws.com` `kms:GenerateDataKey*` + `kms:Decrypt`. Both the topic and key statements are scoped by `aws:SourceAccount` + `aws:SourceArn` (AWS Budgets SNS guide). Phase 4 must add the same for `cloudwatch.amazonaws.com` alarms.
 - Resource tags: `Project=mft-hub`, `Owner=<user>`, `Environment=demo`.
 
 ## Build order
 
 1. Phase 0 — tooling (AWS CLI, CDK), `aws login` (D8), enable Zurich (D25), `cdk bootstrap`; repo + CI skeleton + cdk-nag. **Done 2026-11-11** (local; GitHub push pending).
-2. Phase 1 — `MftCoreStack`: KMS, buckets, log bucket, lifecycle, budget, SNS.
+2. Phase 1 — `MftCoreStack`: KMS, buckets, log bucket, lifecycle, budget, SNS. **Deployed 2026-11-11** from branch `phase-1/core` (user ran `cdk deploy`).
 3. Phase 2 — `MftSftpStack`: Transfer server, IdP Lambda, partner secrets from `partners.json`, access role + session policies.
 4. Phase 3 — EventBridge → SQS → processing Lambda → DynamoDB, idempotency, routing.
 5. Phase 4 — DLQ, alarms, Powertools metrics, smoke test.

@@ -15,7 +15,10 @@ export function buildApp(props?: AppProps): App {
     region: REGION,
   };
 
+  const alertEmail: unknown = app.node.tryGetContext('alertEmail');
+
   new MftCoreStack(app, 'MftCoreStack', {
+    alertEmail: typeof alertEmail === 'string' && alertEmail ? alertEmail : undefined,
     env,
     description: 'MFT Hub - persistent core (KMS, S3, DynamoDB, pipeline, alarms)',
     terminationProtection: app.node.tryGetContext('terminationProtection') !== 'false',
