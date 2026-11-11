@@ -179,7 +179,15 @@ Prompts for my review:
 - CDK's `eventBridgeEnabled` adds a custom-resource Lambda; the native CloudFormation `EventBridgeConfiguration` does the same with no extra function (D31).
 - Ordered the steps so the final status is written last. With the obvious order (status before delete), a crash in between would leave a file in landing that every retry skips as a duplicate.
 
+### Deployment and verification
+
+- I deployed `MftCoreStack` from `main` after merging PR 10 and PR 12. The agent then checked the stack and resources and uploaded 6 files over SFTP as ACMEBANK: one valid and five invalid (wrong content, bad names, empty, a space and a `+` in the name).
+- All 6 went where the design says, with the right reason, tags, SHA-256 and DynamoDB record, about 10 to 15 s after upload. No errors, and nothing in the DLQ.
+- The agent replayed the valid file's event into the queue: it was skipped as a duplicate, with no second record and no second copy.
+- Still open: whether EventBridge URL-encodes keys. Both odd names worked, but the processor's fallback means the logs cannot tell which path ran; S3 access logs will show it.
+
 ### Lessons
 
 - Idempotency keys must separate "same event twice" from "same content twice".
 - In an at-least-once pipeline, write the "done" marker last and make every step before it repeatable.
+- A fallback that makes both cases work also hides which case happened; log which branch ran when the question matters.
