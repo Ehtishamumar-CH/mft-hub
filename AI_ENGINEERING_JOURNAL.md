@@ -141,3 +141,45 @@ Prompts for my review:
 - Read the service's auth contract and limits before writing policy code.
 - Prefer granular nag acknowledgements; a blanket one hides new wildcards.
 - Test the negative paths against the live service, not only in unit tests: path tricks and wrong keys are where isolation bugs hide.
+
+---
+
+## Phase 3 - File pipeline: EventBridge, SQS, processing Lambda, DynamoDB (2026-11-11)
+
+### Goal
+
+Every partner upload is validated (D5), routed to `processed/` or `rejected/` (D6) and recorded in DynamoDB (D12), exactly once in effect even though S3 and EventBridge deliver at least once (D18).
+
+### Prompts
+
+- "lets start with next phase"
+
+### AI output (summary)
+
+- `lib/constructs/file-pipeline.ts` in `MftCoreStack`: `PartnerTransfers` table (CMK, PITR, deletion protection, `status-index` GSI), KMS-encrypted processing queue and DLQ, an EventBridge rule for `Object Created` under `inbound/`, and the processing Lambda (Python 3.12 arm64, 512 MB, 5 min) with its own least-privilege role.
+- `lambdas/src/mft_lambdas/processor.py`: pure validation functions (path, filename pattern and date, partner match, extension, size, magic bytes, SHA-256), routing with status and reason tags, and per-message `batchItemFailures`.
+- 53 new pytest tests with moto, including a simulated crash after the landing delete that the retry must finish, duplicate events and re-uploads of identical content. 7 new Jest tests (40 total).
+
+### My review
+
+_TODO (me): security / cost / correctness review in my own words._
+
+Prompts for my review:
+
+- D30 changes D18's idempotency key from the eTag to the version ID. Do I agree that a re-upload of identical content is a new transfer?
+- The processor can delete anything under landing `inbound/`. Acceptable for one shared function, or one function per partner?
+- A file rejected for size is still copied to quarantine. Is keeping a 5 GB rejected file for 30 days a cost risk?
+- CDK's `SqsEventSource` grants the processor `kms:Decrypt` on the project key with no `kms:ViaService` condition (found by a Jest assertion). Accepted and pinned by a test as decrypt-only. Is that good enough, or should alerts and data get separate keys (D11)?
+- The `SqsQueue` target makes CDK grant `events.amazonaws.com` `Encrypt`, `Decrypt`, `ReEncrypt*` and `GenerateDataKey*` on the key (scoped by `aws:SourceAccount`), more than the documented minimum of `Decrypt` + `GenerateDataKey`. Hand-write that statement instead?
+- A processed file with the same name overwrites the earlier one (versioning keeps the old version for 30 days). Should destinations carry a timestamp?
+
+### Changes made during the phase
+
+- Read the S3 EventBridge event format: the event carries `version-id`, which made the version-based idempotency key possible (D30). The docs do not say whether the key is URL-encoded, so the processor retries a HEAD with the decoded key; to be verified live.
+- CDK's `eventBridgeEnabled` adds a custom-resource Lambda; the native CloudFormation `EventBridgeConfiguration` does the same with no extra function (D31).
+- Ordered the steps so the final status is written last. With the obvious order (status before delete), a crash in between would leave a file in landing that every retry skips as a duplicate.
+
+### Lessons
+
+- Idempotency keys must separate "same event twice" from "same content twice".
+- In an at-least-once pipeline, write the "done" marker last and make every step before it repeatable.
