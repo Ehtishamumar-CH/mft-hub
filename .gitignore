@@ -1,0 +1,33 @@
+# Node / CDK
+node_modules/
+cdk.out/
+*.js
+!jest.config.js
+*.d.ts
+*.tsbuildinfo
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Secrets and local keys (D23): never commit private keys
+.keys/
+*.pem
+id_*
+!id_*.pub
+.env
+.env.*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Local agent settings
+.claude/settings.local.json
