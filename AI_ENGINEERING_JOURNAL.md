@@ -45,3 +45,44 @@ Prompts for my review:
 
 - Check a library's current README before trusting remembered APIs (cdk-nag 3).
 - A security gate needs a test proving it can fail.
+
+---
+
+## Phase 1 - MftCoreStack: KMS, buckets, alerts, budget (2026-11-11)
+
+### Goal
+
+Add the persistent, near-free storage and guardrail layer: one CMK, landing/processed/quarantine buckets with D19 hardening and lifecycle rules, an access-log bucket, an encrypted alert topic, and the $10 monthly budget.
+
+### Prompts
+
+- "lets start next"
+- Decision prompt from the agent: CloudFormation cannot create a budget in any region the SCP allows. Chose "CDK custom resource" (D26).
+
+### AI output (summary)
+
+- `lib/mft-core-stack.ts`: KMS key (annual rotation, alias `alias/mft-hub`, RETAIN). Three SSE-KMS data buckets with bucket keys, Block Public Access, BucketOwnerEnforced, TLS-only plus TLS 1.2 minimum, versioning, server access logs and lifecycle rules. An SSE-S3 access-log bucket. A KMS-encrypted, TLS-only SNS topic with an optional email subscription (`-c alertEmail=...`).
+- `lib/constructs/monthly-budget.ts`: an `AwsCustomResource` that creates and deletes the budget through the Budgets API. IAM is scoped to the one budget ARN. Retries are idempotent.
+- 12 new Jest assertions (15 total) covering encryption, public access, TLS denies, lifecycle, confused-deputy conditions, subscriptions and budget thresholds.
+
+### My review
+
+_TODO (me): security / cost / correctness review in my own words._
+
+Prompts for my review:
+
+- Is the `budgets.amazonaws.com` grant on the shared data key acceptable, or should alerts get their own key (D11 trade-off)?
+- A 90-day expiry on access logs: long enough for an audit story?
+- All buckets are RETAIN. What does Phase 5 teardown need to do about that?
+
+### Changes made during the phase
+
+- Found that `AWS::Budgets::Budget` does not exist in `eu-central-2` / `eu-north-1` CloudFormation and that the SCP blocks CloudFormation in `us-east-1`. Asked for a decision and added D26.
+- Checked the AWS docs: server access logs require an SSE-S3 destination bucket, and Budgets needs topic-policy and key-policy grants for an SSE-KMS topic.
+- cdk-nag flagged `AwsSolutions-IAM4` on CDK's singleton custom-resource Lambda role (`AWSLambdaBasicExecutionRole`). Acknowledged it with a reason. Also acknowledged `AwsSolutions-S1` on the log bucket itself.
+- Tests failed at first: `new App()` in Jest does not load `cdk.json` feature flags, so S3 fell back to ACL-based log delivery. Added `test/helpers.ts` so tests use the same flags as the CLI.
+
+### Lessons
+
+- Check CloudFormation resource-type availability per region (`aws cloudformation describe-type`) before designing around it.
+- Unit tests must synthesize with the same feature flags as the real deploy.
