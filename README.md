@@ -2,7 +2,7 @@
 
 A managed file transfer (MFT) hub on AWS. Partners upload over SFTP (AWS Transfer Family) into a per-partner jail. Every file is validated, routed to `processed/` or quarantined in `rejected/`, and recorded in a DynamoDB audit table. Built with AWS CDK (TypeScript) and Python Lambdas, in `eu-central-2` (Zurich) for Swiss data residency.
 
-> Status: **Phase 1 - core storage, KMS, alerts and budget (`MftCoreStack`).** Design decisions live in [docs/DECISIONS.md](docs/DECISIONS.md).
+> Status: **Phase 2 - SFTP endpoint and Lambda identity provider (`MftSftpStack`).** Phase 1 (`MftCoreStack`) is deployed. Design decisions live in [docs/DECISIONS.md](docs/DECISIONS.md).
 
 ## Architecture (target)
 

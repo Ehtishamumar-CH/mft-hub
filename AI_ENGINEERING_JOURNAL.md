@@ -94,3 +94,50 @@ Prompts for my review:
 - Before treating a missing deploy as a finding, establish when the command was run.
 - Check CloudFormation resource-type availability per region (`aws cloudformation describe-type`) before designing around it.
 - Unit tests must synthesize with the same feature flags as the real deploy.
+
+---
+
+## Phase 2 - MftSftpStack: SFTP endpoint and Lambda identity provider (2026-11-11)
+
+### Goal
+
+Partners log in over SFTP with SSH keys only and each partner sees only its own `/inbound` (write), `/processed` and `/rejected` (read) folders.
+
+### Prompts
+
+- "ok good lets do this" (after merging PR 1 and PR 2, with my approval).
+
+### AI output (summary)
+
+- Demo ed25519 keypairs for `ACMEBANK` and `GLOBEX` in gitignored `.keys/`; public keys in `config/partners.json`, validated by `lib/partners.ts` (ID pattern, key format, IP/CIDR, duplicates).
+- `MftCoreStack` gains one KMS-encrypted secret per partner, the shared partner access role (D28), and a retained Transfer log group.
+- `MftSftpStack`: Python 3.12 arm64 IdP Lambda with its own least-privilege role, a public SFTP-only Transfer server (Lambda IdP, `PUBLIC_KEY` only, `TransferSecurityPolicy-2025-03`, structured logs), invoke permission scoped to the server ARN.
+- `lambdas/src/mft_lambdas/idp.py`: pure functions for home directories, session policy (checked against the 2048-char limit) and source-IP allowlists; denies passwords, non-SFTP, bad usernames, unknown/disabled partners and disallowed IPs. 25 pytest tests, Jest grows to 33.
+
+### My review
+
+_TODO (me): security / cost / correctness review in my own words._
+
+Prompts for my review:
+
+- Is granting `s3:GetObject` on a partner's own `/inbound` acceptable (some SFTP clients stat files after upload)?
+- The IdP fails closed on any error. What does that mean for an outage of Secrets Manager?
+- Cost: the server bills ~$0.30/h from deploy until `cdk destroy MftSftpStack`.
+
+### Changes made during the phase
+
+- Read the Transfer Family docs before designing: Lambda IdP contract, role trust conditions, 2048-char session-policy limit, and that policy variables do not work with LOGICAL home directories. That led to D27.
+- Effective access is role ∩ session policy, so the session policy repeats the KMS statement; without it, uploads to SSE-KMS buckets would fail.
+- cdk-nag 3 reports `IAM5` once per wildcard resource, so every wildcard is acknowledged individually with its reason instead of one blanket acknowledgement.
+- The Jest run caught a bug in the IdP role acknowledgement: with no account at synth time, cdk-nag renders the account as `<AWS::AccountId>`. The ID now handles both cases.
+
+### Deployment and verification
+
+- I ran `cdk deploy` for both stacks. The agent then verified in the account: stack and server state, `test-identity-provider` allow/deny cases, a real SFTP session per partner (upload, forbidden write, forbidden delete, cross-partner and `..` path attempts, wrong key), object encryption, and the IdP and Transfer logs.
+- Everything matched the design. One log nuance: a wrong-key login shows an IdP allow followed by a Transfer `AUTH_FAILURE`, because Transfer does the key comparison.
+
+### Lessons
+
+- Read the service's auth contract and limits before writing policy code.
+- Prefer granular nag acknowledgements; a blanket one hides new wildcards.
+- Test the negative paths against the live service, not only in unit tests: path tricks and wrong keys are where isolation bugs hide.
