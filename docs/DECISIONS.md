@@ -72,6 +72,13 @@ Living log of decisions made while designing the MFT Hub. Each entry: decision, 
 - X-Ray traces show `## handler`, `## ...Processor.process` and S3 and DynamoDB subsegments.
 - Alarms through the KMS-encrypted topic, live: `mft-hub-rejected-file-rate` went to ALARM at 18:21 UTC (66.7 % > 50 %, 3 files) and its SNS action succeeded. A test message put on the DLQ raised `mft-hub-dlq-not-empty` within 2 minutes; `scripts/redrive-dlq.sh` moved it (move task `COMPLETED`, 1 message), the processor skipped it as `DUPLICATE`, and the alarm returned to OK at 18:32 UTC. All three of that alarm's actions (create, ALARM, OK) succeeded.
 
+## Environment facts (verified 2026-11-11, smoke test)
+
+- User redeployed `MftSftpStack` from `main`: `CREATE_COMPLETE`, new server `s-12400f75e89a4fa3b` `ONLINE` (new host key, accepted on first connect).
+- `scripts/smoke-test.sh` at 20:08 UTC: **PASS**, 9 of 9 checks, 68 s end to end (SFTP login, 3 uploads, wait for final records, assertions).
+- Cross-checked outside the script: the IdP logged one `allow` for ACMEBANK; the processor logged the 3 files with the expected outcomes and `keyDecoded: false` (including the name with a space); processing queue and DLQ empty.
+- Side effect: the script rejects 2 of its 3 files, so `mft-hub-rejected-file-rate` went to ALARM (66.7 %) at 20:10 UTC and emails the alert topic; it returns to OK about an hour later.
+
 ## Settled
 
 | #   | Decision                                                                                                                                                                                                                                                                                                                   | Rationale                                                                                                                 |
@@ -127,5 +134,5 @@ Living log of decisions made while designing the MFT Hub. Each entry: decision, 
 2. Phase 1 — `MftCoreStack`: KMS, buckets, log bucket, lifecycle, budget, SNS. **Deployed 2026-11-11** from branch `phase-1/core` (user ran `cdk deploy`).
 3. Phase 2 — `MftSftpStack`: Transfer server, IdP Lambda, partner secrets from `partners.json`, access role + session policies. **Deployed 2026-11-11** from branch `phase-2/sftp` (user ran `cdk deploy`).
 4. Phase 3 — EventBridge → SQS → processing Lambda → DynamoDB, idempotency, routing. **Deployed 2026-11-11** from `main` (PR 12; user ran `cdk deploy`).
-5. Phase 4 — DLQ, alarms, Powertools metrics, smoke test. **Deployed 2026-11-11** from `main` (PR 14; user ran `cdk deploy`). Smoke test over SFTP still to run.
+5. Phase 4 — DLQ, alarms, Powertools metrics, smoke test. **Deployed 2026-11-11** from `main` (PR 14; user ran `cdk deploy`). Smoke test over SFTP passed on 2026-11-11 (see "Environment facts (verified 2026-11-11, smoke test)").
 6. Phase 5 — journal completion, README, teardown script. **Built 2026-11-11** on branch `phase-5/wrap-up` (scripts and docs only; no infrastructure change).

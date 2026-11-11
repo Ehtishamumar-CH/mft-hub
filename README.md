@@ -106,6 +106,7 @@ Always pass the same `alertEmail` when redeploying `MftCoreStack`, or CDK remove
 
 ```bash
 scripts/smoke-test.sh            # 3 SFTP uploads as ACMEBANK; asserts routing, tags, records, empty landing
+                                 # (2 of its 3 files are rejected, so it also trips the rejected-rate alarm)
 scripts/redrive-dlq.sh           # after fixing the cause of a DLQ alarm: replay the DLQ (idempotent, D30)
 scripts/teardown.sh              # destroy MftSftpStack only (stops the hourly charge)
 scripts/teardown.sh --all        # also destroy MftCoreStack; retained data stays, listed in .teardown/
@@ -125,7 +126,8 @@ Each phase was deployed and then checked live in the account; the evidence is in
 - SFTP: per-partner isolation, forbidden writes and deletes, `..` path tricks and wrong keys all denied (Phase 2).
 - Pipeline: valid and invalid files routed with the right reasons, SHA-256 matching the local file, duplicates skipped (Phase 3).
 - Alarms: the rejected-rate and DLQ alarms fired and cleared through the encrypted topic; a DLQ message was replayed with `redrive-dlq.sh` (Phase 4).
-- Not yet run end to end: `scripts/smoke-test.sh` over SFTP (the SFTP stack was down when Phase 4 shipped), and a real budget alert.
+- Smoke test: `scripts/smoke-test.sh` passed all 9 checks over SFTP against a freshly deployed `MftSftpStack` (2026-11-11).
+- Not yet verified: a real budget alert (needs spend over $5).
 
 ## Repository layout
 
