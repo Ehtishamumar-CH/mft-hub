@@ -1,0 +1,17 @@
+{
+  "$comment": "D13: partner onboarding. Public SSH keys only (private keys stay in gitignored .keys/). Keys are generated in Phase 2.",
+  "partners": [
+    {
+      "id": "ACMEBANK",
+      "name": "Acme Bank (demo)",
+      "sshPublicKeys": [],
+      "sourceIps": []
+    },
+    {
+      "id": "GLOBEX",
+      "name": "Globex Corporation (demo)",
+      "sshPublicKeys": [],
+      "sourceIps": []
+    }
+  ]
+}
