@@ -82,7 +82,15 @@ Prompts for my review:
 - cdk-nag flagged `AwsSolutions-IAM4` on CDK's singleton custom-resource Lambda role (`AWSLambdaBasicExecutionRole`). Acknowledged it with a reason. Also acknowledged `AwsSolutions-S1` on the log bucket itself.
 - Tests failed at first: `new App()` in Jest does not load `cdk.json` feature flags, so S3 fell back to ACL-based log delivery. Added `test/helpers.ts` so tests use the same flags as the CLI.
 
+### Deployment and verification
+
+- I ran `cdk deploy MftCoreStack -c alertEmail=...` myself (the agent's own deploy attempt was blocked by its permission mode, by design) and confirmed the SNS email subscription.
+- The agent then checked the live account against the design: stack status, KMS rotation, encryption on each bucket, public access block, ownership, versioning, logging, lifecycle rule state, topic encryption and subscription, and budget limit, thresholds and subscriber.
+- Gap: real budget alert delivery through the encrypted topic is untested until spend crosses 50 %.
+- The agent at first reported "not deployed": it had checked before my deploy ran and did not know when I had run it.
+
 ### Lessons
 
+- Before treating a missing deploy as a finding, establish when the command was run.
 - Check CloudFormation resource-type availability per region (`aws cloudformation describe-type`) before designing around it.
 - Unit tests must synthesize with the same feature flags as the real deploy.

@@ -28,6 +28,15 @@ Living log of decisions made while designing the MFT Hub. Each entry: decision, 
 - **cdk-nag 3.x API:** `Validations.of(app).addPlugins(new AwsSolutionsChecks(app))`; suppressions via `Validations.of(construct).acknowledge({ id, reason })`. This replaces `Aspects` + `NagSuppressions` (D22 still holds: every acknowledgement carries a reason).
 - Git Bash: prefix AWS CLI calls whose arguments start with `/` (SSM names) with `MSYS_NO_PATHCONV=1`.
 
+## Environment facts (verified 2026-11-11, Phase 1 deploy)
+
+- `MftCoreStack` deployed to `eu-central-2` by the user at 13:32 UTC: `CREATE_COMPLETE`, termination protection on, 20 resources.
+- Verified live: KMS key `alias/mft-hub` rotation enabled (365 days). The three data buckets use SSE-KMS with that key and bucket keys; the access-log bucket uses SSE-S3. All four have Block Public Access (all four flags), `BucketOwnerEnforced`, versioning enabled and every lifecycle rule `Enabled`. The data buckets log to the access-log bucket under `landing/`, `processed/` and `quarantine/`.
+- Alert topic is SSE-KMS. The email subscription is confirmed (1 confirmed, 0 pending). The address is supplied at deploy time only (D14).
+- Budget `mft-hub-monthly-e748878c`: $10 monthly COST budget, notifications ACTUAL 50/80/100 and FORECASTED 100, all `OK`. ACTUAL 80 checked: its subscriber is the alert topic (SNS).
+- **Not yet verified:** delivery of a real budget alert through the encrypted topic (needs spend over 50 %).
+- Redeploys must pass the same `-c alertEmail=...`, or CDK removes the subscription.
+
 ## Settled
 
 | #   | Decision                                                                                                                                                                                                                                                                                                                   | Rationale                                                                                                                 |
@@ -72,7 +81,7 @@ Living log of decisions made while designing the MFT Hub. Each entry: decision, 
 ## Build order
 
 1. Phase 0 — tooling (AWS CLI, CDK), `aws login` (D8), enable Zurich (D25), `cdk bootstrap`; repo + CI skeleton + cdk-nag. **Done 2026-11-11** (local; GitHub push pending).
-2. Phase 1 — `MftCoreStack`: KMS, buckets, log bucket, lifecycle, budget, SNS. **Built 2026-11-11** (branch `phase-1/core`; not yet deployed).
+2. Phase 1 — `MftCoreStack`: KMS, buckets, log bucket, lifecycle, budget, SNS. **Deployed 2026-11-11** from branch `phase-1/core` (user ran `cdk deploy`).
 3. Phase 2 — `MftSftpStack`: Transfer server, IdP Lambda, partner secrets from `partners.json`, access role + session policies.
 4. Phase 3 — EventBridge → SQS → processing Lambda → DynamoDB, idempotency, routing.
 5. Phase 4 — DLQ, alarms, Powertools metrics, smoke test.
