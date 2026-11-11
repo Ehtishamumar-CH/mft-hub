@@ -1,6 +1,6 @@
 # Dev/test dependencies for the Python Lambdas (D3, D7). Pinned for reproducible CI.
 # Runtime deps are added per function in later phases; boto3 is provided by the Lambda runtime.
-aws-lambda-powertools==3.37.0
+aws-lambda-powertools==3.39.0
 boto3==1.43.120
 moto[s3,dynamodb,sqs,secretsmanager]==5.2.5
 pytest==9.2.0
