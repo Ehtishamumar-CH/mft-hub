@@ -3,6 +3,8 @@
 One entry per phase (D15): Goal, Prompts, AI output, My review, Changes made, Lessons.
 The agent drafts each entry; **"My review" is written by me, in my own words.**
 
+**Open reviews:** the "My review" sections of Phases 0 to 5 are still TODO. Each lists prompts to answer.
+
 ---
 
 ## Phase 0 - Tooling, repo and CI skeleton (2026-11-11)
@@ -246,3 +248,45 @@ Prompts for my review:
 - Run a script's AWS calls against the real account on the real shell before trusting it; CI on Linux would not catch CRLF.
 - A per-entity nag acknowledgement can hide later findings of the same ID; pin what it covers with a test.
 - Logging which branch a fallback took turned an open question into a one-upload answer.
+
+---
+
+## Phase 5 - Wrap-up: teardown script, README, journal (2026-11-11)
+
+### Goal
+
+Leave the project in a state someone else can read, run and remove: an honest README, a complete decision log, and a teardown that is safe by default.
+
+### Prompts
+
+- "leys start with next phase"
+
+### AI output (summary)
+
+- `scripts/teardown.sh` (D34): SFTP-only by default; `--all` writes a retained-resource manifest and destroys the core stack; `--purge` deletes the retained data and schedules the key for deletion; `--dry-run` prints every command.
+- README rewritten for the finished state: architecture as built, what a partner sees, what happens to a file, security controls, cost, deploy and onboarding, operations, verification status.
+- Journal: this entry and a note that the "My review" sections are still mine to write.
+
+### My review
+
+_TODO (me): security / cost / correctness review in my own words._
+
+Prompts for my review:
+
+- Should `--purge` exist at all in a portfolio repo, or should data deletion stay a manual console task?
+- The KMS key gets the minimum 7-day deletion window. Long enough for a demo account?
+- Does the README claim anything the evidence in DECISIONS.md does not show?
+
+### Changes made during the phase
+
+- The first idea, finding retained resources by tag, failed a live check: CloudFormation does not put `aws:cloudformation:stack-name` on the KMS key, the DynamoDB table or the SQS queues, and the CDK bootstrap bucket and ECR repository share the `Project` tag. A purge by tag would have missed the key and table and could have hit the bootstrap bucket. Switched to a manifest written from the stack before it is destroyed.
+- The dry run against the live account found four bugs before anything was deleted: printed commands disappeared when output was redirected, Git Bash rewrote the `/aws/lambda/...` log group name (the Phase 0 `MSYS_NO_PATHCONV` lesson again), dry-run printed a "deletion scheduled" message, and `--purge FILE` exited before purging.
+- Checked read-only that a truncated `list-object-versions` page with `--query` has no `NextToken` field that `delete-objects` would reject.
+- The README first claimed a Dependabot cooldown that is only in the unmerged PR 11; corrected.
+- No Secrets Manager calls in the script: the project rule asks for the Secrets Manager skill first and it was not available (the AWS MCP server did not connect). Whether CloudFormation-deleted secret names sit in a recovery window is left as an unverified note in the script.
+
+### Lessons
+
+- Destructive scripts need a dry run that shows every command, and the dry run must be run against the real account.
+- Tags are not an inventory: check which resources actually carry them before deleting by tag.
+- Lessons repeat (Git Bash path conversion); put the fix in the script, not only in the notes.

@@ -31,3 +31,6 @@ Thumbs.db
 
 # Local agent settings
 .claude/settings.local.json
+
+# scripts/teardown.sh manifests (resource names of retained resources)
+.teardown/
