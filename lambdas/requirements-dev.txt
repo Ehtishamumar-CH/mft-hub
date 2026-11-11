@@ -5,4 +5,4 @@ boto3==1.43.120
 moto[s3,dynamodb,sqs,secretsmanager]==5.2.5
 pytest==9.2.0
 pytest-cov==7.1.0
-ruff==0.17.3
+ruff==0.17.4
