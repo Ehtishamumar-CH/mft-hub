@@ -233,7 +233,16 @@ Prompts for my review:
 `.
 - cdk-nag flagged `IAM5[Resource::*]` for the X-Ray actions CDK adds with active tracing; acknowledged with the reason (X-Ray has no resource-level permissions).
 
+### Deployment and verification
+
+- I deployed `MftCoreStack` from `main` after merging PR 14. I had destroyed `MftSftpStack` earlier to stop its hourly cost, so the smoke test could not run over SFTP.
+- The agent instead uploaded the same three test cases straight to the landing bucket. Routing, Powertools log fields, metrics by reason and X-Ray traces all appeared as designed.
+- The open Phase 3 question is closed: `keyDecoded: false` for a key with a space, so EventBridge sends raw keys.
+- Both alarm paths were exercised live through the encrypted topic: the rejected-rate alarm fired on real data (2 of 3 rejected), and a test message on the DLQ fired the DLQ alarm, was replayed with `scripts/redrive-dlq.sh`, skipped as a duplicate, and the alarm cleared.
+- Still to do: run `scripts/smoke-test.sh` end to end the next time `MftSftpStack` is deployed.
+
 ### Lessons
 
 - Run a script's AWS calls against the real account on the real shell before trusting it; CI on Linux would not catch CRLF.
 - A per-entity nag acknowledgement can hide later findings of the same ID; pin what it covers with a test.
+- Logging which branch a fallback took turned an open question into a one-upload answer.
