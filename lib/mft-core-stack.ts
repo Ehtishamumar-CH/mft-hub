@@ -1,6 +1,7 @@
 import { Annotations, Duration, RemovalPolicy, Stack, StackProps, Validations } from 'aws-cdk-lib';
 import { PolicyStatement, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
 import { Key } from 'aws-cdk-lib/aws-kms';
+import { LogGroup, RetentionDays } from 'aws-cdk-lib/aws-logs';
 import {
   BlockPublicAccess,
   Bucket,
@@ -14,10 +15,14 @@ import { EmailSubscription } from 'aws-cdk-lib/aws-sns-subscriptions';
 import { Construct } from 'constructs';
 import { PROJECT } from './config';
 import { MonthlyBudget } from './constructs/monthly-budget';
+import { PartnerAccess } from './constructs/partner-access';
+import { Partner } from './partners';
 
 export interface MftCoreStackProps extends StackProps {
   /** D14: alert email, passed at deploy time with `-c alertEmail=...`. Never committed. */
   readonly alertEmail?: string;
+  /** D13: onboarded partners (config/partners.json). */
+  readonly partners?: readonly Partner[];
 }
 
 /** D19: every bucket aborts incomplete multipart uploads after 7 days. */
@@ -40,6 +45,9 @@ export class MftCoreStack extends Stack {
   public readonly quarantineBucket: Bucket;
   public readonly alertTopic: Topic;
   public readonly budget: MonthlyBudget;
+  public readonly partnerAccess: PartnerAccess;
+  /** Transfer Family structured logs. Here, not in MftSftpStack, so they outlive teardowns (D9). */
+  public readonly transferLogGroup: LogGroup;
 
   constructor(scope: Construct, id: string, props: MftCoreStackProps = {}) {
     super(scope, id, props);
@@ -166,6 +174,20 @@ export class MftCoreStack extends Stack {
         conditions: budgetsConditions,
       }),
     );
+
+    // D4/D13/D20: partner identity records and the shared partner access role.
+    this.partnerAccess = new PartnerAccess(this, 'PartnerAccess', {
+      partners: props.partners ?? [],
+      key: this.key,
+      landingBucket: this.landingBucket,
+      processedBucket: this.processedBucket,
+      quarantineBucket: this.quarantineBucket,
+    });
+
+    this.transferLogGroup = new LogGroup(this, 'TransferLogGroup', {
+      retention: RetentionDays.ONE_YEAR,
+      removalPolicy: RemovalPolicy.RETAIN,
+    });
 
     // Defaults: $10/month, ACTUAL at 50/80/100 % and FORECASTED at 100 %.
     this.budget = new MonthlyBudget(this, 'MonthlyBudget', {

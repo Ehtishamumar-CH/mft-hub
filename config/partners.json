@@ -1,16 +1,20 @@
 {
-  "$comment": "D13: partner onboarding. Public SSH keys only (private keys stay in gitignored .keys/). Keys are generated in Phase 2.",
+  "$comment": "D13: partner onboarding. Public SSH keys only (private keys stay in gitignored .keys/). Demo keypairs were generated in Phase 2; private halves live in .keys/.",
   "partners": [
     {
       "id": "ACMEBANK",
       "name": "Acme Bank (demo)",
-      "sshPublicKeys": [],
+      "sshPublicKeys": [
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIoTVMmYTO3uNGowwziM0qw9tX/LHtw4AMRzt3JyCKd8 ACMEBANK@mft-hub-demo"
+      ],
       "sourceIps": []
     },
     {
       "id": "GLOBEX",
       "name": "Globex Corporation (demo)",
-      "sshPublicKeys": [],
+      "sshPublicKeys": [
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAhaXr2+Ys/Wy45QciTzAY1ZMjw6F9bnyZ5IUM2lCoEJ GLOBEX@mft-hub-demo"
+      ],
       "sourceIps": []
     }
   ]
